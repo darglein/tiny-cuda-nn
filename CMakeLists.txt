@@ -247,7 +247,9 @@ if (NOT MSVC)
 endif()
 
 set(BUILD_SHARED_LIBS OFF)
-add_subdirectory("dependencies/fmt")
+if(NOT TARGET fmt)
+	add_subdirectory("dependencies/fmt")
+endif()
 set_property(TARGET fmt PROPERTY POSITION_INDEPENDENT_CODE ON)
 
 ###############################################################################
