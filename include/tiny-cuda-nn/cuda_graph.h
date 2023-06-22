@@ -125,13 +125,16 @@ public:
 			// pointers rather than changing the topology of the graph.)
 			if (m_graph_instance) {
 				cudaGraphExecUpdateResult update_result;
-				//CUDA_CHECK_THROW(cudaGraphExecUpdate(m_graph_instance, m_graph, &error_node, &update_result));
-
+                                cudaGraphNode_t error_node;
+				#if CUDART_VERSION < 12000
+				CUDA_CHECK_THROW(cudaGraphExecUpdate(m_graph_instance, m_graph, &error_node, &update_result));
+				#else
                                 cudaGraphExecUpdateResultInfo resultInfo;
                                 CUDA_CHECK_THROW(cudaGraphExecUpdate(m_graph_instance, m_graph, &resultInfo));
 
 
                                         update_result= resultInfo.result;
+				#endif
 
 				// If the update failed, reset graph instance. We will create a new one next.
 				if (update_result != cudaGraphExecUpdateSuccess) {
