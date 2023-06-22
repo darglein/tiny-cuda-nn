@@ -125,8 +125,8 @@ public:
 			// pointers rather than changing the topology of the graph.)
 			if (m_graph_instance) {
 				cudaGraphExecUpdateResult update_result;
-                                cudaGraphNode_t error_node;
 				#if CUDART_VERSION < 12000
+                                cudaGraphNode_t error_node;
 				CUDA_CHECK_THROW(cudaGraphExecUpdate(m_graph_instance, m_graph, &error_node, &update_result));
 				#else
                                 cudaGraphExecUpdateResultInfo resultInfo;
