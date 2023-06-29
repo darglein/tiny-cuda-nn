@@ -28,7 +28,12 @@
  */
 #pragma once
 
+#include "torch/torch.h"
+
+#ifndef TINY_TORCH
 #include <ATen/cuda/CUDAUtils.h>
+#endif
+
 
 #ifdef snprintf
 #    undef snprintf
@@ -40,10 +45,16 @@
 #define STRINGIFY(x) #x
 #define STR(x) STRINGIFY(x)
 #define FILE_LINE __FILE__ ":" STR(__LINE__)
-#define CHECK_THROW(x) \
-	do { if (!(x)) throw std::runtime_error(std::string(FILE_LINE " check failed " #x)); } while(0)
 
-inline c10::ScalarType torch_type(tcnn::cpp::EPrecision precision)
+#ifndef CHECK_THROW
+#define CHECK_THROW(x)                                                                  \
+    do                                                                                  \
+    {                                                                                   \
+        if (!(x)) throw std::runtime_error(std::string(FILE_LINE " check failed " #x)); \
+    } while (0)
+#endif
+
+inline torch::ScalarType torch_type(tcnn::cpp::EPrecision precision)
 {
     switch (precision)
     {
@@ -236,13 +247,13 @@ class TorchTcnnWrapperModule
 
     tcnn::cpp::EPrecision param_precision() const { return m_module->param_precision(); }
 
-    c10::ScalarType c10_param_precision() const { return torch_type(param_precision()); }
+    torch::ScalarType c10_param_precision() const { return torch_type(param_precision()); }
 
     uint32_t n_output_dims() const { return m_module->n_output_dims(); }
 
     tcnn::cpp::EPrecision output_precision() const { return m_module->output_precision(); }
 
-    c10::ScalarType c10_output_precision() const { return torch_type(output_precision()); }
+    torch::ScalarType c10_output_precision() const { return torch_type(output_precision()); }
 
     nlohmann::json hyperparams() const { return m_module->hyperparams(); }
 
@@ -252,21 +263,21 @@ class TorchTcnnWrapperModule
     std::unique_ptr<tcnn::cpp::Module> m_module;
 };
 
-//#if !defined(TCNN_NO_NETWORKS)
-// Module create_network_with_input_encoding(uint32_t n_input_dims, uint32_t n_output_dims, const nlohmann::json&
-// encoding, const nlohmann::json& network) {
-//   return Module{tcnn::cpp::create_network_with_input_encoding(n_input_dims, n_output_dims, encoding, network)};
-//}
+// #if !defined(TCNN_NO_NETWORKS)
+//  Module create_network_with_input_encoding(uint32_t n_input_dims, uint32_t n_output_dims, const nlohmann::json&
+//  encoding, const nlohmann::json& network) {
+//    return Module{tcnn::cpp::create_network_with_input_encoding(n_input_dims, n_output_dims, encoding, network)};
+// }
 //
-// Module create_network(uint32_t n_input_dims, uint32_t n_output_dims, const nlohmann::json& network) {
-//   return Module{tcnn::cpp::create_network(n_input_dims, n_output_dims, network)};
-//}
-//#endif
+//  Module create_network(uint32_t n_input_dims, uint32_t n_output_dims, const nlohmann::json& network) {
+//    return Module{tcnn::cpp::create_network(n_input_dims, n_output_dims, network)};
+// }
+// #endif
 //
-// Module create_encoding(uint32_t n_input_dims, const nlohmann::json& encoding, tcnn::cpp::EPrecision
-// requested_precision) {
-//   return Module{tcnn::cpp::create_encoding(n_input_dims, encoding, requested_precision)};
-//}
+//  Module create_encoding(uint32_t n_input_dims, const nlohmann::json& encoding, tcnn::cpp::EPrecision
+//  requested_precision) {
+//    return Module{tcnn::cpp::create_encoding(n_input_dims, encoding, requested_precision)};
+// }
 
 class TnnInfo : public torch::CustomClassHolder
 {
@@ -276,7 +287,9 @@ class TnnInfo : public torch::CustomClassHolder
 };
 
 
-namespace torch::autograd
+namespace torch
+{
+namespace autograd
 {
 struct _moduleFunction : public Function<_moduleFunction>
 {
@@ -288,7 +301,7 @@ struct _moduleFunction : public Function<_moduleFunction>
         // automatically materialize it as torch.zeros.
         ctx->set_materialize_grads(false);
 
-        TnnInfo* info             = native_tcnn_module.toCustomClass<TnnInfo>().get();
+        TnnInfo* info = native_tcnn_module.toCustomClass<TnnInfo>().get();
         CHECK_NOTNULL(info->module);
         auto [native_ctx, output] = info->module->fwd(input, params);
 
@@ -317,7 +330,7 @@ struct _moduleFunction : public Function<_moduleFunction>
         auto params        = saved_tensors[1];
         auto output        = saved_tensors[2];
 
-        TnnInfo* info    = ctx->saved_data["native_tcnn_module"].toCustomClass<TnnInfo>().get();
+        TnnInfo* info = ctx->saved_data["native_tcnn_module"].toCustomClass<TnnInfo>().get();
         CHECK_NOTNULL(info->module);
 
 
@@ -326,7 +339,7 @@ struct _moduleFunction : public Function<_moduleFunction>
 
             // float loss_scale = ctx->saved_data["loss_scale"].toDouble();
             // auto scaled_grad               = doutput * loss_scale;
-            auto scaled_grad = doutput;
+            auto scaled_grad               = doutput;
             auto [input_grad, weight_grad] = info->module->bwd(info->native_ctx, input, params, output, scaled_grad);
 
             // if (input_grad.defined())
@@ -347,7 +360,8 @@ struct _moduleFunction : public Function<_moduleFunction>
         }
     }
 };
-}  // namespace torch::autograd
+}  // namespace autograd
+}  // namespace torch
 
 
 class TcnnTorchModuleImpl : public torch::nn::Module
@@ -362,13 +376,18 @@ class TcnnTorchModuleImpl : public torch::nn::Module
 
     torch::Tensor forward(torch::Tensor x)
     {
-        auto info_unq = std::make_unique<TnnInfo>();
+#ifdef TINY_TORCH
+        throw std::runtime_error("not implemented");
+        return {};
+#else
+        auto info_unq    = std::make_unique<TnnInfo>();
         info_unq->module = &module;
         c10::intrusive_ptr<TnnInfo> info_ptr(std::move(info_unq));
         torch::IValue val(std::move(info_ptr));
         std::vector<torch::Tensor> result = torch::autograd::_moduleFunction::apply(val, x, params, loss_scale);
-        CHECK_EQ(result.size(),1);
+        CHECK_EQ(result.size(), 1);
         return result.front();
+#endif
     }
 
     TorchTcnnWrapperModule module;
