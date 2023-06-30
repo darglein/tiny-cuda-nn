@@ -31,7 +31,7 @@
 #include "torch/torch.h"
 
 #ifndef TINY_TORCH
-#include <ATen/cuda/CUDAUtils.h>
+#    include <ATen/cuda/CUDAUtils.h>
 #endif
 
 
@@ -47,11 +47,11 @@
 #define FILE_LINE __FILE__ ":" STR(__LINE__)
 
 #ifndef CHECK_THROW
-#define CHECK_THROW(x)                                                                  \
-    do                                                                                  \
-    {                                                                                   \
-        if (!(x)) throw std::runtime_error(std::string(FILE_LINE " check failed " #x)); \
-    } while (0)
+#    define CHECK_THROW(x)                                                                  \
+        do                                                                                  \
+        {                                                                                   \
+            if (!(x)) throw std::runtime_error(std::string(FILE_LINE " check failed " #x)); \
+        } while (0)
 #endif
 
 inline torch::ScalarType torch_type(tcnn::cpp::EPrecision precision)
@@ -287,7 +287,11 @@ class TnnInfo : public torch::CustomClassHolder
 };
 
 
+#ifdef TINY_TORCH
+namespace tinytorch
+#else
 namespace torch
+#endif
 {
 namespace autograd
 {
