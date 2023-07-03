@@ -67,7 +67,7 @@ struct VectorFragment
     V x;
 };
 
-static constexpr float clamp_value = 0.02f;
+static constexpr float clamp_value = 0.01f;
 
 static constexpr float K_ACT               = 10.0f;
 static constexpr float SOFTPLUS_BETA2      = 2.f;
