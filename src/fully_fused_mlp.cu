@@ -704,7 +704,7 @@ void FullyFusedMLP<T, WIDTH>::inference_mixed_precision_impl(cudaStream_t stream
 	// If we have more than 16 output dimensions, these will be taken care of by CUTLASS rather than
 	// the fully fused kernel (which will have written out the second-to-last layer activations).
 	if (m_output_width > 16) {
-		fc_multiply<LastLayer>(stream, output_weight_matrix(use_inference_params), inference_tmp, output, m_output_activation);
+		fc_multiply<LastLayer<T>>(stream, output_weight_matrix(use_inference_params), inference_tmp, output, m_output_activation);
 	}
 }
 
@@ -733,7 +733,7 @@ std::unique_ptr<Context> FullyFusedMLP<T, WIDTH>::forward_impl(cudaStream_t stre
 	// If we have more than 16 output dimensions, these will be taken care of by CUTLASS rather than
 	// the fully fused kernel (which will have written out the second-to-last layer activations).
 	if (output && m_output_width > 16) {
-		fc_multiply<LastLayer>(stream, output_weight_matrix(use_inference_params), forward->hidden.back(), *output, m_output_activation);
+		fc_multiply<LastLayer<T>>(stream, output_weight_matrix(use_inference_params), forward->hidden.back(), *output, m_output_activation);
 	}
 
 	return forward;
@@ -789,13 +789,13 @@ void FullyFusedMLP<T, WIDTH>::backward_impl(
 	// Output layer
 	if (param_gradients_mode != EGradientMode::Ignore) {
 		multi_streams.emplace_back(stream, 2);
-		fc_multiply_split_k<LastLayerK>(multi_streams.back().get(1), tmp_dL_doutput, forward.hidden.at(tmp_idx).transposed(), output_gradient_matrix(), split_k_factor, param_gradient_beta);
+		fc_multiply_split_k<LastLayerK<T>>(multi_streams.back().get(1), tmp_dL_doutput, forward.hidden.at(tmp_idx).transposed(), output_gradient_matrix(), split_k_factor, param_gradient_beta);
 	}
 
 	// If the output width is larger than 16 dims, we use cutlass to backpropagate through the last layer
 	// rather than fusing it with our kernel.
 	if (m_output_width > 16) {
-		fc_multiply<FullLayer>(stream, output_weight_matrix(use_inference_params).transposed(), tmp_dL_doutput, forward.hidden.at(tmp_idx), backward_tmp.at(backward_tmp_idx), m_activation, true);
+		fc_multiply<FullLayer<T>>(stream, output_weight_matrix(use_inference_params).transposed(), tmp_dL_doutput, forward.hidden.at(tmp_idx), backward_tmp.at(backward_tmp_idx), m_activation, true);
 	}
 
 	// Only let the fully fused kernel compute gradients w.r.t. the input, if the input layer has the same size & layout as the other layers
@@ -826,7 +826,7 @@ void FullyFusedMLP<T, WIDTH>::backward_impl(
 
 		if (param_gradients_mode != EGradientMode::Ignore) {
 			multi_streams.emplace_back(stream, 2);
-			fc_multiply_split_k<FullLayerK>(multi_streams.back().get(1), backward_tmp.at(backward_tmp_idx-1), forward.hidden.at(tmp_idx).transposed(), gradient_matrix_at(matrix_idx), split_k_factor, param_gradient_beta);
+			fc_multiply_split_k<FullLayerK<T>>(multi_streams.back().get(1), backward_tmp.at(backward_tmp_idx-1), forward.hidden.at(tmp_idx).transposed(), gradient_matrix_at(matrix_idx), split_k_factor, param_gradient_beta);
 		}
 
 		tmp_idx -= 1;
@@ -835,13 +835,13 @@ void FullyFusedMLP<T, WIDTH>::backward_impl(
 
 	if (param_gradients_mode != EGradientMode::Ignore) {
 		multi_streams.emplace_back(stream, 2);
-		fc_multiply_split_k<FullLayerK>(multi_streams.back().get(1), backward_tmp.at(backward_tmp_idx-1), input.transposed(), input_gradient_matrix(), split_k_factor, param_gradient_beta);
+		fc_multiply_split_k<FullLayerK<T>>(multi_streams.back().get(1), backward_tmp.at(backward_tmp_idx-1), input.transposed(), input_gradient_matrix(), split_k_factor, param_gradient_beta);
 	}
 
 	// If requested and if the fully fused kernel didn't already take care of it, compute sensitivity of loss w.r.t. inputs
 	if (dL_dinput && !dL_dinput_fused) {
 		// TODO: optimization opportunity to only compute sensitivity w.r.t selected SUBSET of inputs. Useful for NFs, where conditional dims stay the same.
-		fc_multiply<FullLayer>(stream, input_weight_matrix(use_inference_params).transposed(), backward_tmp.at(backward_tmp_idx-1), *dL_dinput);
+		fc_multiply<FullLayer<T>>(stream, input_weight_matrix(use_inference_params).transposed(), backward_tmp.at(backward_tmp_idx-1), *dL_dinput);
 	}
 }
 
@@ -900,9 +900,12 @@ void FullyFusedMLP<T, WIDTH>::initialize_params(pcg32& rnd, float* params_full_p
 	}
 }
 
-template class FullyFusedMLP<network_precision_t, 128>;
-template class FullyFusedMLP<network_precision_t, 64>;
-template class FullyFusedMLP<network_precision_t, 32>;
-template class FullyFusedMLP<network_precision_t, 16>;
+template class FullyFusedMLP<__half, 128>;
+template class FullyFusedMLP<__half, 64>;
+template class FullyFusedMLP<__half, 32>;
+template class FullyFusedMLP<__half, 16>;
+
+
+template class FullyFusedMLP<float, 64>;
 
 TCNN_NAMESPACE_END

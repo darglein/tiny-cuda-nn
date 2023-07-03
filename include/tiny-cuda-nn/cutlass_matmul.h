@@ -58,16 +58,19 @@ TCNN_NAMESPACE_BEGIN
 			throw std::runtime_error(std::string(FILE_LINE " " #x " failed with error ") + cutlassGetStatusString(error)); \
 	} while(0)
 
+template <typename T>
 using SmArch = std::conditional_t<MIN_GPU_ARCH >= 80,
-	std::conditional_t<std::is_same<network_precision_t, float>::value, cutlass::arch::Sm75, cutlass::arch::Sm80>,
+	std::conditional_t<std::is_same<T, float>::value, cutlass::arch::Sm75, cutlass::arch::Sm80>,
 	std::conditional_t<MIN_GPU_ARCH >= 75,
 		cutlass::arch::Sm75,
 		cutlass::arch::Sm70
 	>
 >;
 
-using TypeAccumulator = std::conditional_t<std::is_same<network_precision_t, float>::value, float, cutlass::half_t>;
-using TypeCompute = std::conditional_t<std::is_same<network_precision_t, float>::value, float, cutlass::half_t>;
+template <typename T>
+using TypeAccumulator = std::conditional_t<std::is_same<T , float>::value, float, cutlass::half_t>;
+template <typename T>
+using TypeCompute = std::conditional_t<std::is_same<T, float>::value, float, cutlass::half_t>;
 
 template <typename T>
 using MMAOp = typename std::conditional<
@@ -80,7 +83,7 @@ template <typename T>
 using ShapeMMAOp = typename std::conditional<
 	std::is_same<MMAOp<T>, cutlass::arch::OpClassTensorOp>::value,
 	typename std::conditional<
-		std::is_same<SmArch, cutlass::arch::Sm80>::value || std::is_same<SmArch, cutlass::arch::Sm75>::value,
+		std::is_same<SmArch<T>, cutlass::arch::Sm80>::value || std::is_same<SmArch<T>, cutlass::arch::Sm75>::value,
 		cutlass::gemm::GemmShape<16, 8, 8>,
 		cutlass::gemm::GemmShape<8, 8, 4>
 	>::type,
@@ -93,19 +96,25 @@ struct LayerConfig {
 	using k_warp = warp;
 };
 
+template <typename T>
 using FullLayerK = typename std::conditional<
-	std::is_same<MMAOp<network_precision_t>, cutlass::arch::OpClassSimt>::value,
+	std::is_same<MMAOp<T>, cutlass::arch::OpClassSimt>::value,
 	LayerConfig<cutlass::gemm::GemmShape<128, 128, 8>, cutlass::gemm::GemmShape<32, 64, 8>>,
 	LayerConfig<cutlass::gemm::GemmShape<64, 64, 32>, cutlass::gemm::GemmShape<32, 32, 32>>
 >::type;
-using LastLayerK = FullLayerK;
 
+template <typename T>
+using LastLayerK = FullLayerK<T>;
+
+template <typename T>
 using FullLayer = typename std::conditional<
-	std::is_same<MMAOp<network_precision_t>, cutlass::arch::OpClassSimt>::value,
+	std::is_same<MMAOp<T>, cutlass::arch::OpClassSimt>::value,
 	LayerConfig<cutlass::gemm::GemmShape<128, 128, 8>, cutlass::gemm::GemmShape<32, 64, 8>>,
 	LayerConfig<cutlass::gemm::GemmShape<128, 128, 32>, cutlass::gemm::GemmShape<64, 64, 32>>
 >::type;
-using LastLayer = FullLayer;
+
+template <typename T>
+using LastLayer = FullLayer<T>;
 
 // This code section describes how threadblocks are scheduled on GPU
 using SwizzleThreadBlock = cutlass::gemm::threadblock::GemmIdentityThreadblockSwizzle<>;
@@ -269,13 +278,13 @@ template <typename T>
 static constexpr int n_vectorized_elements = std::is_same<MMAOp<T>, cutlass::arch::OpClassTensorOp>::value ? (128 / cutlass::sizeof_bits<T>::value) : 1;
 
 template <typename T>
-using SumOp = cutlass::epilogue::thread::LinearCombination<T, n_vectorized_elements<T>, TypeAccumulator, TypeCompute>;
+using SumOp = cutlass::epilogue::thread::LinearCombination<T, n_vectorized_elements<T>, TypeAccumulator<T>, TypeCompute<T>>;
 
 template <typename T>
-using ActivationOp = ActivationEpilogue<T, n_vectorized_elements<T>, TypeAccumulator, TypeCompute>;
+using ActivationOp = ActivationEpilogue<T, n_vectorized_elements<T>,  TypeAccumulator<T>, TypeCompute<T>>;
 
 template <typename T>
-using ActivationTransferOp = ActivationTransferEpilogue<T, n_vectorized_elements<T>, TypeAccumulator, TypeCompute>;
+using ActivationTransferOp = ActivationTransferEpilogue<T, n_vectorized_elements<T>,  TypeAccumulator<T>, TypeCompute<T>>;
 
 
 template <typename EPILOGUE, typename LayerConfig, typename TypeA, typename LayoutA, typename TypeB, typename LayoutB, typename TypeOutput, typename LayoutOutput>
@@ -286,9 +295,9 @@ using OurGemm = cutlass::gemm::device::Gemm<
 	LayoutB,
 	TypeOutput,
 	LayoutOutput,
-	TypeAccumulator,
+	TypeAccumulator<TypeA>,
 	MMAOp<TypeA>,
-	SmArch,
+	SmArch<TypeA>,
 	typename LayerConfig::k_thread_block,
 	typename LayerConfig::k_warp,
 	ShapeMMAOp<TypeA>,
@@ -305,9 +314,9 @@ using SplitKGemm = cutlass::gemm::device::GemmSplitKParallel<
 	LayoutB,
 	TypeOutput,
 	LayoutOutput,
-	TypeAccumulator,
+	TypeAccumulator<TypeA>,
 	MMAOp<TypeA>,
-	SmArch,
+	SmArch<TypeA>,
 	typename LayerConfig::k_thread_block,
 	typename LayerConfig::k_warp,
 	ShapeMMAOp<TypeA>,
@@ -473,7 +482,7 @@ void fc_multiply_split_k(cudaStream_t stream, const GPUMatrix<TypeA, LayoutA>& A
 		{(MatmulTypeCompute*)B.data(), (int)B.stride()},
 		{(MatmulTypeAccumulator*)C.data(), (int)C.stride()},
 		{(MatmulTypeAccumulator*)D.data(), (int)D.stride()},
-		{(TypeCompute)1.0f, (TypeCompute)beta},
+		{(TypeCompute<TypeA>)1.0f, (TypeCompute<TypeA>)beta},
 		split_k_slices
 	};
 
